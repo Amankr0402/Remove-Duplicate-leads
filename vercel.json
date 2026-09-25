@@ -5,11 +5,5 @@
       "source": "/(.*)",
       "destination": "/src/index.js"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/dedupe/run",
-      "schedule": "0 * * * *"
-    }
   ]
 }
