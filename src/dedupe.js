@@ -7,6 +7,8 @@ const EXCLUDED_UPDATE_FIELDS = new Set([
   "_id",
   "id",
   "phone", // Phone cannot be modified via update endpoint (causes 403 INVALID_LEAD)
+  "status", // Permanent lead should keep its active status, never absorb duplicate/cold status
+  "lostReasonid", // Never mark permanent lead with a lost reason
   "created_at",
   "created_on",
   "createdAt",
@@ -149,6 +151,7 @@ function calculateMerge(permanentLead, duplicateLeads) {
     for (const [key, val] of Object.entries(dupFields)) {
       if (EXCLUDED_UPDATE_FIELDS.has(key)) continue;
       if (!isNonEmpty(val)) continue;
+      if (key === "name" && typeof val === "string" && val.startsWith("[DUPLICATE]")) continue;
 
       const currentPermVal = permFields[key];
 

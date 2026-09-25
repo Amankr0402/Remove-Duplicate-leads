@@ -354,7 +354,151 @@ if (require.main === module) {
     });
 }
 
+/**
+ * Merges duplicates for a specific phone number on-demand.
+ * @param {string} rawPhone
+ * @param {Object} options
+ * @param {boolean} [options.dryRun]
+ */
+async function mergePhoneGroup(rawPhone, options = {}) {
+  const norm = normalizePhone(rawPhone);
+  if (!norm) {
+    throw new Error(`Invalid phone number: "${rawPhone}"`);
+  }
+  const dryRun = options.dryRun !== undefined ? Boolean(options.dryRun) : false;
+  logger.info(`Running targeted phone merge for ${norm} (dryRun=${dryRun})...`);
+
+  const variants = getPhoneSearchVariants(norm);
+  const searchResult = await telecrm.searchLeads({ fields: { phone: variants } }, 0, 100);
+
+  // De-duplicate leads by _id
+  const uniqueLeadsMap = new Map();
+  for (const item of searchResult) {
+    const id = item._id || item.id;
+    if (id && !uniqueLeadsMap.has(id)) {
+      uniqueLeadsMap.set(id, item);
+    }
+  }
+
+  const allMatchingLeads = Array.from(uniqueLeadsMap.values());
+  if (allMatchingLeads.length < 2) {
+    return {
+      success: true,
+      phone: norm,
+      duplicateCount: allMatchingLeads.length,
+      message: `Only ${allMatchingLeads.length} lead(s) found for phone ${norm}. No duplicates to merge.`,
+      leads: allMatchingLeads.map((l) => ({ id: l._id || l.id, name: l.fields?.name, status: l.fields?.status })),
+    };
+  }
+
+  // Fetch full details
+  const fullLeads = [];
+  for (const stub of allMatchingLeads) {
+    const leadId = stub._id || stub.id;
+    try {
+      const full = await telecrm.getLead(leadId, true);
+      fullLeads.push(full);
+    } catch (e) {
+      fullLeads.push(stub);
+    }
+  }
+
+  const selection = pickPermanentLead(fullLeads);
+  const mergePlan = calculateMerge(selection.permanentLead, selection.duplicateLeads);
+  const permId = selection.permanentLead._id || selection.permanentLead.id;
+  const duplicateIds = selection.duplicateLeads.map((d) => d._id || d.id);
+
+  // Backup snapshot
+  const dateStr = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 16);
+  const backupFileName = `targeted_${norm}_${dateStr}.json`;
+  const backupFilePath = path.join(backupsDir, backupFileName);
+  try {
+    fs.writeFileSync(
+      backupFilePath,
+      JSON.stringify(
+        {
+          timestamp: new Date().toISOString(),
+          phone: norm,
+          dryRun,
+          permanentLead: selection.permanentLead,
+          duplicateLeads: selection.duplicateLeads,
+          mergePlan,
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+  } catch (e) {
+    logger.warn(`Failed to save backup snapshot: ${e.message}`);
+  }
+
+  if (dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      phone: norm,
+      message: `[DRY-RUN] Found ${duplicateIds.length} duplicate(s) for phone ${norm}`,
+      permanentLead: {
+        id: permId,
+        name: selection.permanentLead.fields?.name || "N/A",
+        status: selection.permanentLead.fields?.status || "N/A",
+        score: selection.permanentScore?.total,
+      },
+      duplicateLeads: selection.duplicateLeads.map((d) => ({
+        id: d._id || d.id,
+        name: d.fields?.name || "N/A",
+        status: d.fields?.status || "N/A",
+      })),
+      fieldsToMerge: mergePlan.fieldsToUpdate,
+      conflicts: mergePlan.conflicts,
+    };
+  }
+
+  // Execute Live Merge
+  // 1. Update permanent lead with merged fields & audit note
+  const permActions = [
+    {
+      type: "SYSTEM_NOTE",
+      text: mergePlan.noteText,
+    },
+  ];
+  await telecrm.updateLead(permId, mergePlan.fieldsToUpdate, permActions);
+  logger.success(`Updated permanent lead ${permId} with merged fields & audit note.`);
+
+  // 2. Mark duplicate leads as COLD/Lost with [DUPLICATE] prefix
+  for (const dup of selection.duplicateLeads) {
+    const dupId = dup._id || dup.id;
+    const existingName = (dup.fields?.name || dup.fields?.first_name || "").replace(/^\[DUPLICATE\]\s*/, "");
+    const dupFields = {
+      name: `[DUPLICATE] ${existingName}`.trim(),
+      status: "COLD",
+      lostReasonid: "Unknown Reason",
+    };
+    const dupActions = [
+      {
+        type: "SYSTEM_NOTE",
+        text: `[AUTOMATED CLEANUP] Marked as Duplicate. Merged into permanent lead ${permId}.`,
+      },
+    ];
+    await telecrm.updateLead(dupId, dupFields, dupActions);
+    logger.success(`Marked duplicate lead ${dupId} as '[DUPLICATE]' (Status: COLD/Lost).`);
+  }
+
+  return {
+    success: true,
+    dryRun: false,
+    phone: norm,
+    message: `Successfully merged ${duplicateIds.length} duplicate lead(s) into permanent lead ${permId}`,
+    permanentLeadId: permId,
+    duplicateLeadIds: duplicateIds,
+    mergedFields: mergePlan.fieldsToUpdate,
+    conflictsRecorded: mergePlan.conflicts.length,
+  };
+}
+
 module.exports = {
   runDeduplication,
+  mergePhoneGroup,
   getJobStatus,
 };

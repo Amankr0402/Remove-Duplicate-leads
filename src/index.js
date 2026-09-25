@@ -2,7 +2,7 @@ const express = require("express");
 const cron = require("node-cron");
 const config = require("./config");
 const logger = require("./logger");
-const { runDeduplication, getJobStatus } = require("./job");
+const { runDeduplication, mergePhoneGroup, getJobStatus } = require("./job");
 
 const app = express();
 app.use(express.json());
@@ -179,6 +179,43 @@ app.post("/api/dedupe/run", async (req, res) => {
     });
   } catch (err) {
     logger.error("Run endpoint error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Targeted merge for a single phone number on-demand
+app.post("/api/dedupe/merge-phone", async (req, res) => {
+  try {
+    const phone = req.body?.phone || req.query?.phone;
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required parameter 'phone' in request body or query (e.g. { \"phone\": \"918867446294\" })",
+      });
+    }
+    const dryRun = req.body?.dryRun !== undefined ? Boolean(req.body.dryRun) : req.query?.dryRun !== undefined ? req.query.dryRun === "true" : false;
+    const result = await mergePhoneGroup(phone, { dryRun });
+    res.json(result);
+  } catch (err) {
+    logger.error("merge-phone error:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/dedupe/merge-phone", async (req, res) => {
+  try {
+    const phone = req.query?.phone;
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required query parameter 'phone' (e.g. ?phone=918867446294)",
+      });
+    }
+    const dryRun = req.query?.dryRun !== undefined ? req.query.dryRun === "true" : true;
+    const result = await mergePhoneGroup(phone, { dryRun });
+    res.json(result);
+  } catch (err) {
+    logger.error("merge-phone GET error:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
