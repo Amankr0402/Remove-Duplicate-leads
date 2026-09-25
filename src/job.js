@@ -260,14 +260,19 @@ async function runDeduplication(options = {}) {
         // 2. Mark duplicate leads as "Duplicate" (closest alternative to delete)
         for (const dup of duplicateLeads) {
           const dupId = dup._id || dup.id;
+          const existingName = (dup.fields?.name || dup.fields?.first_name || "").replace(/^\[DUPLICATE\]\s*/, "");
+          const dupFields = {
+            name: `[DUPLICATE] ${existingName}`.trim(),
+            status: "Duplicate",
+          };
           const dupActions = [
             {
               type: "SYSTEM_NOTE",
               text: `[AUTOMATED CLEANUP] Marked as Duplicate. Merged into permanent lead ${permId}.`,
             },
           ];
-          await telecrm.updateLead(dupId, { status: "Duplicate" }, dupActions);
-          logger.success(`Marked duplicate lead ${dupId} as 'Duplicate'.`);
+          await telecrm.updateLead(dupId, dupFields, dupActions);
+          logger.success(`Marked duplicate lead ${dupId} with [DUPLICATE] in TeleCRM.`);
           summary.deletedCount++;
         }
 
