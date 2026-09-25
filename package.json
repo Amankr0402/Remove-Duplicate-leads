@@ -1,0 +1,19 @@
+{
+  "name": "telecrm-duplicate-cleaner",
+  "version": "1.0.0",
+  "description": "Removes and merges duplicate leads in TeleCRM using the official Sync API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "job": "node src/job.js",
+    "preview": "node src/job.js --preview"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3"
+  },
+  "keywords": ["telecrm", "deduplication", "sync-api", "lead-management"],
+  "author": "",
+  "license": "ISC"
+}
