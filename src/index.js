@@ -7,6 +7,15 @@ const { runDeduplication, getJobStatus } = require("./job");
 const app = express();
 app.use(express.json());
 
+// Normalize URL in case Vercel rewrote request to entrypoint path
+app.use((req, res, next) => {
+  if (req.url === "/src/index.js" || req.url.startsWith("/src/index.js?")) {
+    const original = req.headers["x-matched-path"] || req.headers["x-forwarded-url"] || "/";
+    req.url = original.startsWith("/src/index.js") ? "/" : original;
+  }
+  next();
+});
+
 const startTime = Date.now();
 
 // Root route - Overview Dashboard & API Directory
