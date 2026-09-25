@@ -9,9 +9,13 @@ const { pickPermanentLead, calculateMerge, getLeadCreationTimestamp } = require(
 // Concurrency mutex flag
 let isJobRunning = false;
 
-const backupsDir = path.resolve(__dirname, "../backups");
-if (!fs.existsSync(backupsDir)) {
-  fs.mkdirSync(backupsDir, { recursive: true });
+const backupsDir = process.env.VERCEL ? path.join("/tmp", "backups") : path.resolve(__dirname, "../backups");
+try {
+  if (!fs.existsSync(backupsDir)) {
+    fs.mkdirSync(backupsDir, { recursive: true });
+  }
+} catch (e) {
+  // Ignore filesystem errors in restricted environments
 }
 
 /**

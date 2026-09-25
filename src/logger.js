@@ -1,9 +1,13 @@
 const fs = require("fs");
 const path = require("path");
 
-const logsDir = path.resolve(__dirname, "../logs");
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+const logsDir = process.env.VERCEL ? path.join("/tmp", "logs") : path.resolve(__dirname, "../logs");
+try {
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+} catch (e) {
+  // Ignore filesystem errors in restricted environments
 }
 
 function getTimestamp() {

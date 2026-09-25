@@ -90,25 +90,30 @@ app.post("/api/dedupe/run", async (req, res) => {
   }
 });
 
-// Start scheduled cron job (runs every hour at minute 0)
-const cronExpression = process.env.CRON_SCHEDULE || "0 * * * *";
-logger.info(`Initializing cron schedule: "${cronExpression}"`);
-cron.schedule(cronExpression, async () => {
-  logger.info(`[CRON] Triggering scheduled deduplication run...`);
-  try {
-    await runDeduplication();
-  } catch (err) {
-    logger.error("[CRON] Scheduled deduplication failed:", err.message);
-  }
-});
+// Only start local cron and server when running standalone (not inside Vercel serverless)
+let server = null;
+if (process.env.VERCEL !== "1") {
+  // Start scheduled cron job (runs every hour at minute 0)
+  const cronExpression = process.env.CRON_SCHEDULE || "0 * * * *";
+  logger.info(`Initializing cron schedule: "${cronExpression}"`);
+  cron.schedule(cronExpression, async () => {
+    logger.info(`[CRON] Triggering scheduled deduplication run...`);
+    try {
+      await runDeduplication();
+    } catch (err) {
+      logger.error("[CRON] Scheduled deduplication failed:", err.message);
+    }
+  });
 
-// Start Express server
-const port = config.port;
-const server = app.listen(port, () => {
-  logger.success(`TeleCRM Dedupe server listening on port ${port}`);
-  logger.info(`Health check: http://localhost:${port}/api/health`);
-  logger.info(`Preview API:  http://localhost:${port}/api/dedupe/preview`);
-  logger.info(`Run API:      http://localhost:${port}/api/dedupe/run`);
-});
+  const port = config.port;
+  server = app.listen(port, () => {
+    logger.success(`TeleCRM Dedupe server listening on port ${port}`);
+    logger.info(`Health check: http://localhost:${port}/api/health`);
+    logger.info(`Preview API:  http://localhost:${port}/api/dedupe/preview`);
+    logger.info(`Run API:      http://localhost:${port}/api/dedupe/run`);
+  });
+}
 
-module.exports = { app, server };
+app.app = app;
+app.server = server;
+module.exports = app;
