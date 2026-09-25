@@ -246,28 +246,27 @@ async function runDeduplication(options = {}) {
       try {
         logger.info(`Merging duplicate group for phone ${phone} (Permanent Lead: ${permId})...`);
 
-        // 1. Update permanent lead with merged fields if any
-        if (mergePlan.mergedFieldsCount > 0) {
-          await telecrm.updateLead(permId, mergePlan.fieldsToUpdate);
-          logger.success(`Updated permanent lead ${permId} with merged fields.`);
-        }
-
-        // 2. Add SYSTEM_NOTE to permanent lead
-        await telecrm.createAction(permId, {
-          type: "SYSTEM_NOTE",
-          text: mergePlan.noteText,
-        });
-        logger.success(`Added merge audit SYSTEM_NOTE to permanent lead ${permId}.`);
+        // 1. Update permanent lead with merged fields and attach audit note
+        const permActions = [
+          {
+            type: "SYSTEM_NOTE",
+            text: mergePlan.noteText,
+          },
+        ];
+        await telecrm.updateLead(permId, mergePlan.fieldsToUpdate, permActions);
+        logger.success(`Updated permanent lead ${permId} with merged fields and audit note.`);
         summary.mergedCount++;
 
-        // 3. Mark duplicate leads as "Duplicate" (closest alternative to delete)
+        // 2. Mark duplicate leads as "Duplicate" (closest alternative to delete)
         for (const dup of duplicateLeads) {
           const dupId = dup._id || dup.id;
-          await telecrm.updateLead(dupId, { status: "Duplicate" });
-          await telecrm.createAction(dupId, {
-            type: "SYSTEM_NOTE",
-            text: `[AUTOMATED CLEANUP] Marked as Duplicate. Merged into permanent lead ${permId}.`,
-          });
+          const dupActions = [
+            {
+              type: "SYSTEM_NOTE",
+              text: `[AUTOMATED CLEANUP] Marked as Duplicate. Merged into permanent lead ${permId}.`,
+            },
+          ];
+          await telecrm.updateLead(dupId, { status: "Duplicate" }, dupActions);
           logger.success(`Marked duplicate lead ${dupId} as 'Duplicate'.`);
           summary.deletedCount++;
         }

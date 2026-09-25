@@ -69,7 +69,9 @@ class TelecrmClient {
         const data = await response.json().catch(() => null);
 
         if (!response.ok) {
-          const errMsg = data?.message || data?.error || (data ? JSON.stringify(data) : response.statusText);
+          const errMsg = (typeof data?.message === "string" ? data.message : null) || 
+            (typeof data?.error === "string" ? data.error : null) || 
+            (data ? JSON.stringify(data) : response.statusText);
           throw new Error(`API Error [${response.status}] ${endpoint}: ${errMsg}`);
         }
 
@@ -121,13 +123,17 @@ class TelecrmClient {
   }
 
   /**
-   * Update lead fields
+   * Update lead fields and attach actions/notes
    * Official endpoint: POST /enterprise/{enterpriseId}/lead/{leadId}
-   * Body: { "fields": { ... } }
+   * Body: { "fields": { ... }, "actions": [ ... ] }
    */
-  async updateLead(leadId, fields = {}) {
+  async updateLead(leadId, fields = {}, actions = []) {
     const endpoint = `/enterprise/${this.enterpriseId}/lead/${leadId}`;
-    const body = JSON.stringify({ fields });
+    const payload = { fields };
+    if (Array.isArray(actions) && actions.length > 0) {
+      payload.actions = actions;
+    }
+    const body = JSON.stringify(payload);
     const res = await this._request(endpoint, {
       method: "POST",
       body,
@@ -138,23 +144,31 @@ class TelecrmClient {
   /**
    * Add an action / note to a lead
    * Official endpoint: POST /enterprise/{enterpriseId}/lead/{leadId}/action
-   * Body: { "action": { "type": "SYSTEM_NOTE", "text": "...", "created_on": Date.now() } }
    */
   async createAction(leadId, actionData = {}) {
     const endpoint = `/enterprise/${this.enterpriseId}/lead/${leadId}/action`;
+    const actionObj = typeof actionData === "string" ? { text: actionData } : actionData;
     const body = JSON.stringify({
-      action: {
-        type: actionData.type || "SYSTEM_NOTE",
-        text: actionData.text || "",
-        created_on: actionData.created_on || Date.now(),
-        ...actionData,
-      },
+      actions: [
+        {
+          type: actionObj.type || "SYSTEM_NOTE",
+          text: actionObj.text || "",
+          ...actionObj,
+        },
+      ],
     });
-    const res = await this._request(endpoint, {
-      method: "POST",
-      body,
-    });
-    return res?.data || res;
+    try {
+      const res = await this._request(endpoint, {
+        method: "POST",
+        body,
+      });
+      return res?.data || res;
+    } catch (err) {
+      // In TeleCRM Sync API, custom actions may require custom action definitions,
+      // so if this separate endpoint warns or errors, log and do not break the merge flow.
+      logger.warn(`Action creation on lead ${leadId} skipped: ${err.message}`);
+      return null;
+    }
   }
 }
 
