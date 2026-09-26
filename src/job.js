@@ -263,6 +263,7 @@ async function runDeduplication(options = {}) {
           const existingName = (dup.fields?.name || dup.fields?.first_name || "").replace(/^\[DUPLICATE\]\s*/, "");
           const dupFields = {
             name: `[DUPLICATE] ${existingName}`.trim(),
+            employeeid: config.duplicateAssignee,
             status: "COLD",
             lostReasonid: "Unknown Reason",
           };
@@ -472,6 +473,7 @@ async function mergePhoneGroup(rawPhone, options = {}) {
     const existingName = (dup.fields?.name || dup.fields?.first_name || "").replace(/^\[DUPLICATE\]\s*/, "");
     const dupFields = {
       name: `[DUPLICATE] ${existingName}`.trim(),
+      employeeid: config.duplicateAssignee,
       status: "COLD",
       lostReasonid: "Unknown Reason",
     };

@@ -9,6 +9,7 @@ const EXCLUDED_UPDATE_FIELDS = new Set([
   "phone", // Phone cannot be modified via update endpoint (causes 403 INVALID_LEAD)
   "status", // Permanent lead should keep its active status, never absorb duplicate/cold status
   "lostReasonid", // Never mark permanent lead with a lost reason
+  "employeeid", // Permanent lead should keep its existing sales rep assignee
   "created_at",
   "created_on",
   "createdAt",
