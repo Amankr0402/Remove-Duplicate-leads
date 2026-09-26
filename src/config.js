@@ -9,6 +9,7 @@ const config = {
   lookbackMinutes: parseInt(process.env.LOOKBACK_MINUTES || "60", 10),
   defaultCountryCode: process.env.DEFAULT_COUNTRY_CODE || "91",
   duplicateAssignee: process.env.DUPLICATE_ASSIGNEE_EMAIL || "duplicate.leads@theelefant.ai",
+  duplicateStatus: process.env.DUPLICATE_STAGE || "Duplicate",
   port: parseInt(process.env.PORT || "3000", 10),
 };
 
