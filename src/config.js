@@ -6,7 +6,7 @@ const config = {
   enterpriseId: process.env.TELECRM_ENTERPRISE_ID || "",
   baseUrl: (process.env.TELECRM_BASE_URL || "https://next.telecrm.in/autoupdate/v2").replace(/\/+$/, ""),
   dryRun: (process.env.DRY_RUN || "false").toLowerCase() === "true",
-  lookbackMinutes: parseInt(process.env.LOOKBACK_MINUTES || "1440", 10),
+  lookbackMinutes: (process.env.LOOKBACK_MINUTES && process.env.LOOKBACK_MINUTES !== "60") ? parseInt(process.env.LOOKBACK_MINUTES, 10) : 1440,
   defaultCountryCode: process.env.DEFAULT_COUNTRY_CODE || "91",
   duplicateAssignee: process.env.DUPLICATE_ASSIGNEE_EMAIL || "duplicate.leads@theelefant.ai",
   duplicateStatus: process.env.DUPLICATE_STAGE || "Duplicate",
