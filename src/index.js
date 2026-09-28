@@ -145,14 +145,14 @@ app.get("/api/dedupe/preview", async (req, res) => {
   }
 });
 
-// 3. Trigger dedupe run endpoint
-app.post("/api/dedupe/run", async (req, res) => {
+// 3. Trigger dedupe run endpoint (supports POST and GET, and /api/cron)
+const handleDedupeRun = async (req, res) => {
   try {
     const dryRun = req.body?.dryRun !== undefined ? Boolean(req.body.dryRun) : req.query.dryRun !== undefined ? req.query.dryRun === "true" : config.dryRun;
     const lookbackMinutes = req.body?.lookbackMinutes !== undefined ? parseInt(req.body.lookbackMinutes, 10) : req.query.lookbackMinutes !== undefined ? parseInt(req.query.lookbackMinutes, 10) : config.lookbackMinutes;
-    const maxPhones = req.body?.maxPhones !== undefined ? parseInt(req.body.maxPhones, 10) : 150;
+    const maxPhones = req.body?.maxPhones !== undefined ? parseInt(req.body.maxPhones, 10) : 50;
 
-    logger.info(`Received POST /api/dedupe/run (dryRun=${dryRun}, lookback=${lookbackMinutes}, maxPhones=${maxPhones})`);
+    logger.info(`Received dedupe trigger [${req.method} ${req.path}] (dryRun=${dryRun}, lookback=${lookbackMinutes}, maxPhones=${maxPhones})`);
 
     // Run job asynchronously or synchronously based on caller preference
     const isAsync = req.query.async === "true" || req.body?.async === true;
@@ -183,7 +183,12 @@ app.post("/api/dedupe/run", async (req, res) => {
     logger.error("Run endpoint error:", err.message);
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+
+app.post("/api/dedupe/run", handleDedupeRun);
+app.get("/api/dedupe/run", handleDedupeRun);
+app.get("/api/cron", handleDedupeRun);
+app.post("/api/cron", handleDedupeRun);
 
 // 4. Targeted merge for a single phone number on-demand
 app.post("/api/dedupe/merge-phone", async (req, res) => {

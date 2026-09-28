@@ -346,7 +346,9 @@ async function runDeduplication(options = {}) {
           const dupFields = {
             name: `[DUPLICATE] ${existingName}`.trim(),
             assignee: config.duplicateAssignee,
+            employeeid: config.duplicateAssignee,
             status: config.duplicateStatus,
+            stage: config.duplicateStatus,
           };
           const dupActions = [
             {
