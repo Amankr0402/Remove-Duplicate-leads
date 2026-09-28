@@ -133,6 +133,15 @@ async function runDeduplication(options = {}) {
         break;
       }
 
+      // If the oldest lead on this page is older than cutoffTime, stop paginating
+      if (cutoffTime > 0 && page.length > 0) {
+        const lastLeadTime = getLeadCreationTimestamp(page[page.length - 1]);
+        if (lastLeadTime < cutoffTime) {
+          keepPaginating = false;
+          break;
+        }
+      }
+
       skip += pageSize;
       if (page.length < pageSize) {
         break;
@@ -142,59 +151,85 @@ async function runDeduplication(options = {}) {
     summary.uniquePhonesScanned = leadsByNormalizedPhone.size;
     logger.info(`Scanned ${summary.leadsFetched} leads across ${summary.uniquePhonesScanned} unique phone numbers.`);
 
-    // Step 2: For each unique phone, search all variants to catch historical duplicates
-    // with different phone formats (e.g. 91... vs 0... vs +91...)
-    const processedGroupPhones = new Set();
-    const duplicateGroups = [];
-
-    for (const [normPhone] of leadsByNormalizedPhone.entries()) {
-      if (processedGroupPhones.has(normPhone)) continue;
-
-      // Stop gracefully if we've hit maxPhones limit
-      if (processedGroupPhones.size >= maxPhones) {
-        summary.hasMore = true;
-        logger.warn(`[LIMIT] Reached maxPhones limit (${maxPhones}). Stopping early. Run again to continue.`);
-        break;
-      }
-
-      // Stop gracefully if approaching timeout
-      if (Date.now() - startTime > timeoutMs) {
-        summary.hasMore = true;
-        logger.warn(`[TIMEOUT] Approaching timeout (${timeoutMs}ms). Stopping early to avoid forced kill.`);
-        break;
-      }
-
-      const variants = getPhoneSearchVariants(normPhone);
-      const searchResult = await telecrm.searchLeads({ fields: { phone: variants } }, 0, 100);
-
-      // De-duplicate leads by _id
+    // Step 2: Identify duplicate phone groups directly from the scanned leads
+    const candidateGroups = [];
+    for (const [normPhone, leads] of leadsByNormalizedPhone.entries()) {
       const uniqueLeadsMap = new Map();
-      for (const item of searchResult) {
-        const id = item._id || item.id;
+      for (const lead of leads) {
+        const id = lead._id || lead.id;
         if (id && !uniqueLeadsMap.has(id)) {
-          uniqueLeadsMap.set(id, item);
+          uniqueLeadsMap.set(id, lead);
         }
       }
 
-      // Filter out leads already marked as [DUPLICATE] to avoid re-processing
-      const allMatchingLeads = Array.from(uniqueLeadsMap.values()).filter((lead) => {
+      const activeLeads = Array.from(uniqueLeadsMap.values()).filter((lead) => {
         const name = lead.fields?.name || lead.fields?.first_name || "";
         const status = lead.fields?.status || "";
-        const isAlreadyDuplicate = name.startsWith("[DUPLICATE]") || status === config.duplicateStatus;
-        return !isAlreadyDuplicate;
+        return !name.startsWith("[DUPLICATE]") && status !== config.duplicateStatus;
       });
 
-      if (allMatchingLeads.length >= 2) {
-        processedGroupPhones.add(normPhone);
-        duplicateGroups.push({
+      if (activeLeads.length >= 2) {
+        candidateGroups.push({
           normalizedPhone: normPhone,
-          leads: allMatchingLeads,
+          leads: activeLeads,
         });
       }
     }
 
-    summary.duplicateGroupsFound = duplicateGroups.length;
-    logger.info(`Found ${duplicateGroups.length} duplicate phone group(s).`);
+    summary.duplicateGroupsFound = candidateGroups.length;
+    logger.info(`Identified ${candidateGroups.length} duplicate phone group(s) among scanned leads.`);
+
+    // Cap the number of duplicate groups to process in this run to stay safely within execution limits
+    const duplicateGroupLimit = Math.min(maxPhones, 50);
+    const groupsToProcess = candidateGroups.slice(0, duplicateGroupLimit);
+    if (candidateGroups.length > duplicateGroupLimit) {
+      summary.hasMore = true;
+      logger.info(`Processing first ${groupsToProcess.length} of ${candidateGroups.length} duplicate groups. Run again to process remaining groups.`);
+    }
+
+    const duplicateGroups = [];
+    for (const group of groupsToProcess) {
+      if (Date.now() - startTime > timeoutMs) {
+        summary.hasMore = true;
+        logger.warn(`[TIMEOUT] Approaching timeout (${timeoutMs}ms). Stopping early.`);
+        break;
+      }
+
+      try {
+        const variants = getPhoneSearchVariants(group.normalizedPhone);
+        const searchResult = await telecrm.searchLeads({ fields: { phone: variants } }, 0, 100);
+
+        const uniqueLeadsMap = new Map();
+        for (const l of group.leads) {
+          const id = l._id || l.id;
+          if (id) uniqueLeadsMap.set(id, l);
+        }
+        for (const item of searchResult) {
+          const id = item._id || item.id;
+          if (id && !uniqueLeadsMap.has(id)) {
+            uniqueLeadsMap.set(id, item);
+          }
+        }
+
+        const allMatchingLeads = Array.from(uniqueLeadsMap.values()).filter((lead) => {
+          const name = lead.fields?.name || lead.fields?.first_name || "";
+          const status = lead.fields?.status || "";
+          return !name.startsWith("[DUPLICATE]") && status !== config.duplicateStatus;
+        });
+
+        if (allMatchingLeads.length >= 2) {
+          duplicateGroups.push({
+            normalizedPhone: group.normalizedPhone,
+            leads: allMatchingLeads,
+          });
+        }
+      } catch (err) {
+        logger.error(`Error querying variants for ${group.normalizedPhone}:`, err.message);
+        duplicateGroups.push(group);
+      }
+    }
+
+    logger.info(`Processed ${duplicateGroups.length} duplicate group(s) in this pass.`);
 
     // Step 3: Fetch full details (including actions) for scoring & plan merge
     const detailedGroups = [];
