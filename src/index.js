@@ -2,7 +2,7 @@ const express = require("express");
 const cron = require("node-cron");
 const config = require("./config");
 const logger = require("./logger");
-const { runDeduplication, mergePhoneGroup, getJobStatus } = require("./job");
+const { runDeduplication, mergePhoneGroup, getJobStatus, resetJobLock } = require("./job");
 
 const app = express();
 app.use(express.json());
@@ -220,7 +220,14 @@ app.get("/api/dedupe/merge-phone", async (req, res) => {
   }
 });
 
-// Only start local cron and server when running standalone (not inside Vercel serverless)
+// 5. Emergency lock reset (use if job gets stuck)
+app.post("/api/dedupe/reset-lock", (req, res) => {
+  resetJobLock();
+  res.json({
+    success: true,
+    message: "Job lock has been manually reset. You can now trigger a new run.",
+  });
+});
 let server = null;
 if (process.env.VERCEL !== "1") {
   // Start scheduled cron job (runs every hour at minute 0)

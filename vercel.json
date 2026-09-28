@@ -11,11 +11,5 @@
       "src": "/(.*)",
       "dest": "src/index.js"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/dedupe/run",
-      "schedule": "0 * * * *"
-    }
   ]
 }

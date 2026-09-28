@@ -6,8 +6,21 @@ const telecrm = require("./telecrmClient");
 const { normalizePhone, getPhoneSearchVariants } = require("./phone");
 const { pickPermanentLead, calculateMerge, getLeadCreationTimestamp } = require("./dedupe");
 
-// Concurrency mutex flag
-let isJobRunning = false;
+// Concurrency mutex — stores the timestamp when the job started, or null if idle.
+// Auto-expires after LOCK_TIMEOUT_MS to prevent permanent stuck state on Vercel.
+const LOCK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+let jobStartedAt = null;
+
+function isLockActive() {
+  if (!jobStartedAt) return false;
+  if (Date.now() - jobStartedAt > LOCK_TIMEOUT_MS) {
+    // Lock has expired — auto-release it
+    logger.warn(`[LOCK] Job lock expired after ${LOCK_TIMEOUT_MS / 1000}s. Auto-releasing stale lock.`);
+    jobStartedAt = null;
+    return false;
+  }
+  return true;
+}
 
 const backupsDir = process.env.VERCEL ? path.join("/tmp", "backups") : path.resolve(__dirname, "../backups");
 try {
@@ -26,13 +39,14 @@ try {
  * @returns {Promise<Object>} Run summary
  */
 async function runDeduplication(options = {}) {
-  if (isJobRunning) {
-    const msg = "A deduplication job is already running. Concurrency lock prevented execution.";
+  if (isLockActive()) {
+    const runningForMs = Date.now() - jobStartedAt;
+    const msg = `A deduplication job is already running. Concurrency lock prevented execution. (running for ${Math.round(runningForMs / 1000)}s)`;
     logger.warn(msg);
-    return { status: "busy", message: msg };
+    return { status: "busy", message: msg, lockAgeSeconds: Math.round(runningForMs / 1000) };
   }
 
-  isJobRunning = true;
+  jobStartedAt = Date.now();
   const startTime = Date.now();
   const dryRun = options.dryRun !== undefined ? Boolean(options.dryRun) : config.dryRun;
   const lookbackMinutes = options.lookbackMinutes !== undefined ? parseInt(options.lookbackMinutes, 10) : config.lookbackMinutes;
@@ -292,7 +306,7 @@ async function runDeduplication(options = {}) {
   } finally {
     summary.finishedAt = new Date().toISOString();
     summary.durationMs = Date.now() - startTime;
-    isJobRunning = false;
+    jobStartedAt = null; // Release lock
     logger.logRunSummary(summary);
     logger.info(`Job completed in ${summary.durationMs}ms.`);
   }
@@ -301,8 +315,11 @@ async function runDeduplication(options = {}) {
 }
 
 function getJobStatus() {
+  const running = isLockActive();
   return {
-    isRunning: isJobRunning,
+    isRunning: running,
+    lockAgeSeconds: running ? Math.round((Date.now() - jobStartedAt) / 1000) : null,
+    lockExpiresInSeconds: running ? Math.round((LOCK_TIMEOUT_MS - (Date.now() - jobStartedAt)) / 1000) : null,
     config: {
       dryRun: config.dryRun,
       lookbackMinutes: config.lookbackMinutes,
@@ -501,4 +518,5 @@ module.exports = {
   runDeduplication,
   mergePhoneGroup,
   getJobStatus,
+  resetJobLock: () => { jobStartedAt = null; logger.warn("[LOCK] Job lock manually reset."); },
 };
