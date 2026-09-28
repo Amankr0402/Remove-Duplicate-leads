@@ -150,24 +150,26 @@ app.post("/api/dedupe/run", async (req, res) => {
   try {
     const dryRun = req.body?.dryRun !== undefined ? Boolean(req.body.dryRun) : req.query.dryRun !== undefined ? req.query.dryRun === "true" : config.dryRun;
     const lookbackMinutes = req.body?.lookbackMinutes !== undefined ? parseInt(req.body.lookbackMinutes, 10) : req.query.lookbackMinutes !== undefined ? parseInt(req.query.lookbackMinutes, 10) : config.lookbackMinutes;
+    const maxPhones = req.body?.maxPhones !== undefined ? parseInt(req.body.maxPhones, 10) : 150;
 
-    logger.info(`Received POST /api/dedupe/run (dryRun=${dryRun}, lookback=${lookbackMinutes})`);
+    logger.info(`Received POST /api/dedupe/run (dryRun=${dryRun}, lookback=${lookbackMinutes}, maxPhones=${maxPhones})`);
 
     // Run job asynchronously or synchronously based on caller preference
     const isAsync = req.query.async === "true" || req.body?.async === true;
 
     if (isAsync) {
       // Fire and forget
-      runDeduplication({ dryRun, lookbackMinutes });
+      runDeduplication({ dryRun, lookbackMinutes, maxPhones });
       return res.status(202).json({
         success: true,
         message: "Deduplication job dispatched in background",
         mode: dryRun ? "DRY-RUN" : "LIVE",
         lookbackMinutes,
+        maxPhones,
       });
     }
 
-    const result = await runDeduplication({ dryRun, lookbackMinutes });
+    const result = await runDeduplication({ dryRun, lookbackMinutes, maxPhones });
     if (result.status === "busy") {
       return res.status(409).json(result);
     }

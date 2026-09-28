@@ -36,6 +36,8 @@ try {
  * @param {Object} options
  * @param {boolean} [options.dryRun] - Overrides config.dryRun
  * @param {number} [options.lookbackMinutes] - Overrides config.lookbackMinutes (0 means all)
+ * @param {number} [options.maxPhones] - Max unique phones to process per run (default 150)
+ * @param {number} [options.timeoutMs] - Stop gracefully before this ms elapsed (default 240000)
  * @returns {Promise<Object>} Run summary
  */
 async function runDeduplication(options = {}) {
@@ -50,8 +52,10 @@ async function runDeduplication(options = {}) {
   const startTime = Date.now();
   const dryRun = options.dryRun !== undefined ? Boolean(options.dryRun) : config.dryRun;
   const lookbackMinutes = options.lookbackMinutes !== undefined ? parseInt(options.lookbackMinutes, 10) : config.lookbackMinutes;
+  const maxPhones = options.maxPhones !== undefined ? parseInt(options.maxPhones, 10) : 150;
+  const timeoutMs = options.timeoutMs !== undefined ? parseInt(options.timeoutMs, 10) : 240000; // 240s default (safe margin before Vercel 300s kill)
 
-  logger.info(`Starting deduplication job (dryRun=${dryRun}, lookbackMinutes=${lookbackMinutes})...`);
+  logger.info(`Starting deduplication job (dryRun=${dryRun}, lookbackMinutes=${lookbackMinutes}, maxPhones=${maxPhones})...`);
 
   const summary = {
     startedAt: new Date(startTime).toISOString(),
@@ -59,6 +63,7 @@ async function runDeduplication(options = {}) {
     durationMs: 0,
     dryRun,
     lookbackMinutes,
+    maxPhones,
     leadsFetched: 0,
     uniquePhonesScanned: 0,
     duplicateGroupsFound: 0,
@@ -66,6 +71,7 @@ async function runDeduplication(options = {}) {
     mergedCount: 0,
     deletedCount: 0,
     conflictsCount: 0,
+    hasMore: false, // true if stopped early due to maxPhones or timeout
     groups: [],
     errors: [],
   };
@@ -136,6 +142,20 @@ async function runDeduplication(options = {}) {
 
     for (const [normPhone] of leadsByNormalizedPhone.entries()) {
       if (processedGroupPhones.has(normPhone)) continue;
+
+      // Stop gracefully if we've hit maxPhones limit
+      if (processedGroupPhones.size >= maxPhones) {
+        summary.hasMore = true;
+        logger.warn(`[LIMIT] Reached maxPhones limit (${maxPhones}). Stopping early. Run again to continue.`);
+        break;
+      }
+
+      // Stop gracefully if approaching timeout
+      if (Date.now() - startTime > timeoutMs) {
+        summary.hasMore = true;
+        logger.warn(`[TIMEOUT] Approaching timeout (${timeoutMs}ms). Stopping early to avoid forced kill.`);
+        break;
+      }
 
       const variants = getPhoneSearchVariants(normPhone);
       const searchResult = await telecrm.searchLeads({ fields: { phone: variants } }, 0, 100);
