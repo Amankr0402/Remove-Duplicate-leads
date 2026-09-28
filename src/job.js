@@ -169,7 +169,13 @@ async function runDeduplication(options = {}) {
         }
       }
 
-      const allMatchingLeads = Array.from(uniqueLeadsMap.values());
+      // Filter out leads already marked as [DUPLICATE] to avoid re-processing
+      const allMatchingLeads = Array.from(uniqueLeadsMap.values()).filter((lead) => {
+        const name = lead.fields?.name || lead.fields?.first_name || "";
+        const status = lead.fields?.status || "";
+        const isAlreadyDuplicate = name.startsWith("[DUPLICATE]") || status === config.duplicateStatus;
+        return !isAlreadyDuplicate;
+      });
 
       if (allMatchingLeads.length >= 2) {
         processedGroupPhones.add(normPhone);
