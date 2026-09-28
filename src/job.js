@@ -86,6 +86,13 @@ async function runDeduplication(options = {}) {
     // Step 1: Scan recent leads
     logger.info(`Fetching leads from TeleCRM...`);
     while (keepPaginating) {
+      // Stop fetching if approaching timeout
+      if (Date.now() - startTime > timeoutMs * 0.5) {
+        summary.hasMore = true;
+        logger.warn(`[TIMEOUT] Approaching timeout during lead fetch. Stopping pagination early.`);
+        break;
+      }
+
       const page = await telecrm.searchLeads({}, skip, pageSize);
       if (!page || page.length === 0) {
         break;
